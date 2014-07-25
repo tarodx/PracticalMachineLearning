@@ -1,0 +1,188 @@
+---
+title: "How well people do activities?"
+output: html_document
+---
+
+## Summary
+Actually, people love to record all the training they do, using their smartphones. So there are a lot of useful data that can provide very smart information about the way they are doing exercises.
+
+The goal of this studio is to predict the manner in which people do their exercises. Based on a set of records we are going to study the way they are training by developing a model using the Random Forest approach. The dataset contains 160 variables. One of them, called "classe" is the target to predict and the others 159 are going to be analysed in order to determine whether or not they are useful for our model purpose (predictors).
+
+
+## Analysis
+```{r}
+
+# Load caret package
+library(caret)
+
+# Read training and testing dataset
+training <- read.csv("./pml-training.csv", sep=",", header=TRUE)
+testing <- read.csv("./pml-testing.csv", sep=",", header=TRUE)
+
+```
+
+We have two datasets: 
+* "pml-training.csv" 
+* "pml.testing.csv"
+
+Based on the "pml.training" dataset, we are going to develop a Random Forest model and after it, we will test it using "pml-testing" dataset to find out how good it is.
+
+### Variable analysis
+The target variable (classe) is a categorical variable and has five different values: A, B, C, D, E.
+
+Next step is to analyze the columns of our training dataset to determine if there are any column we can remove from the model.
+
+As we can see in the table:
+
+* There is a variable called "X" which is like an incremental number id. -> remove it
+
+* There is a variable called "user_name" which is the name of the user who submitted the info -> remove it
+
+* There is a variable called "cvtd_timestamp" which is a date. -> remove it
+
+* There is a variable called "new_window" 
+```{r echo=TRUE}
+
+# By making a summary of this variable we can see that it takes two different values: "no" and "yes" but value
+# "yes" has lowest representation, so it is not going to be a useful predictor -> remove it
+summary(training$new_window)
+
+# Remove this four variables
+training1 <- training[, -c(1, 2, 5, 6)]
+
+```
+
+* There are a lot variables with a lot of "null" values, so we can remove them because they are uninformed and they are not going to be predictors: For doing that automatically we are going to make a function that count the number of NA values for each column and if its value is greater than 20% of the rows, we will remove it.
+
+```{r echo=TRUE, warning=FALSE}
+
+clean_table <- function(table_in) {
+        
+        ## table_in: input dataset
+        ## return a cleaned dataset without unnecessary variables
+        
+        # Get number of columns
+        cols <- ncol(table_in)
+        rows <- nrow(table_in)
+        
+        # Array with the column id to delete
+        delete_col <- c()
+        
+        # Calculate the number of NA values for each column except "classe" column (our target)
+        for( i in 1:cols-1){
+                
+                # Get number of NA´S values
+                tmp <- nrow(table_in[is.na(as.numeric(as.character(table_in[, i]))), ])
+                        
+                # We suppose that a variable having more than 20% of its values equal to NA 
+                # Is going to be a bad predictor, so we will remove it from the input table
+                if(tmp > round(0.20 * rows, 0)){
+                        delete_col <- c(delete_col, i)
+                }   
+        }
+        
+        # Create a new datset without all the columns that have more than 20% of NA values.
+        table_out <- table_in[, -delete_col]
+           
+        table_out
+}
+
+training2 <- clean_table(training1)
+
+```
+
+At this point we have cleaned our training dataset deleting unnecessary variables. Now it has 56 variables.
+
+Another good practise is to find correlated predictors, doing a principal components analysis (PCA) in our training dataset
+
+```{r echo=TRUE}
+
+# Create a correlated matrix with all variables except our target (classe)
+correlated <- abs(cor(training2[, -56]))
+diag(correlated) <- 0 # All variables have a correlation of 1 with themselves
+correlated <- which(correlated > 0.8, arr.ind=T)
+
+length(unique(sort(correlated)))
+
+```
+
+As we can see, there are a lot of correlated variables (22). Our model based on Random Forest approach will decide what are the best predictors for our target, so it is not necessary to make combinations of our initial variables.
+
+
+### Cross-Validation
+Using Cross-Validation techniques, we are going to sample our training dataset in two new tables: training3 and testing3. Training dataset has about 20.000 rows, so we can take a sample about 60-70 % of the total size and in this way, we will have two new dataset for test our model approach.
+
+For modeling with guarantee we can use samples higher than 1000 rows, so in this case, we will get a training sample with about 20% of the total size for training.
+
+Now we are going to take a sample of the 20%. 
+
+```{r}
+
+# Get training sample (20% of the total training dataset size)
+inTrain <- createDataPartition(y = training2$classe, p=0.2, list=FALSE)
+training3 <- training2[inTrain, ]
+testing3 <- training2[-inTrain, ]
+
+```
+
+### Execute Random Forest approach
+
+```{r echo=TRUE}
+
+# Plot our categorical target "classe" to see how it looks like
+qplot(classe, data=training3)
+
+# Set seed to repeat test
+set.seed(1234)
+
+# Fit the model
+modFit <- train(classe ~ ., data=training3, method="rf", prox=TRUE)
+
+# See model result:
+# 55 predictors
+# optimal model with mtry = 28
+print(modFit)
+
+# See final model
+print(modFit$finalModel)
+
+# Get the specific selected tree (28)
+selectedTree <- getTree(modFit$finalModel, k=28)
+
+```
+
+As we can see in our model, we get an Error Rate of 0.76% which is a good result for the analysis done.
+
+
+### Testing the model
+
+Now we can predict on new samples to see how good is our approach. We are going to use our "testing3" dataset, obtained when we made the partition based on the training dataset.
+
+```{r echo=TRUE}
+
+predictions <- predict(modFit, testing3)
+
+confusionMatrix(predictions, testing3$classe)
+
+# Print predictions
+qplot(predictions, classe, data=testing3)
+
+```
+
+As we see when we predict on our training3 dataset, we get an Accuracy of the 0.993 (99%), so when can determine that our model approach is good to predict our target variable (classe)
+
+
+## Original testing dataset test
+
+Finally, we are going to test our model in the original testing dataset (20 rows)
+
+```{r echo=TRUE}
+
+pred <- predict(modFit, testing)
+
+# B A B A A E D B A A B C B A E E A B B B
+pred
+
+```
+
+Our model approach using Random Forest, gets 20/20 on the testing dataset, so we can determine that finally it is a good model!
